@@ -128,40 +128,43 @@ namespace PGPConsole
       return output;
     }
 
-    public static bool VerifySignature(Stream inputStream, Stream publicKeyStream)
+    public static bool VerifyDetachedSignature(string filePath, Stream signatureStream, Stream publicKeyStream)
     {
-      inputStream = PgpUtilities.GetDecoderStream(inputStream);
+      signatureStream = PgpUtilities.GetDecoderStream(signatureStream);
 
-      PgpObjectFactory pgpFactory = new PgpObjectFactory(inputStream);
-      PgpCompressedData compressedData = (PgpCompressedData)pgpFactory.NextPgpObject();
-      pgpFactory = new PgpObjectFactory(compressedData.GetDataStream());
-      PgpOnePassSignatureList signatureList = (PgpOnePassSignatureList)pgpFactory.NextPgpObject();
-      PgpOnePassSignature signature = signatureList[0];
-      PgpLiteralData literalData = (PgpLiteralData)pgpFactory.NextPgpObject();
+      PgpObjectFactory pgpFactory = new PgpObjectFactory(signatureStream);
+      PgpObject pgpObject = pgpFactory.NextPgpObject();
+      PgpSignatureList signatureList;
 
-      using (Stream input = literalData.GetInputStream())
+      if (pgpObject is PgpCompressedData pgpCompressedData)
       {
-        PgpPublicKeyRingBundle bundle = new PgpPublicKeyRingBundle(PgpUtilities.GetDecoderStream(publicKeyStream));
-        PgpPublicKey publicKey = bundle.GetPublicKey(signature.KeyId);
+        PgpCompressedData compressedData = pgpCompressedData;
+        pgpFactory = new PgpObjectFactory(compressedData.GetDataStream());
 
-        using (Stream fileStream = File.Create(literalData.FileName))
-        {
-          signature.InitVerify(publicKey);
-
-          int ch;
-
-          while ((ch = input.ReadByte()) >= 0)
-          {
-            signature.Update((byte)ch);
-            fileStream.WriteByte((byte)ch);
-          }
-        }
+        signatureList = (PgpSignatureList)pgpFactory.NextPgpObject();
+      }
+      else
+      {
+        signatureList = (PgpSignatureList)pgpObject;
       }
 
-      PgpSignatureList pgpSignatureList = (PgpSignatureList)pgpFactory.NextPgpObject();
-      PgpSignature pgpSignature = pgpSignatureList[0];
+      PgpPublicKeyRingBundle keyRingBundle = new PgpPublicKeyRingBundle(PgpUtilities.GetDecoderStream(publicKeyStream));
 
-      return signature.Verify(pgpSignature);
+      using (Stream inputFileStream = File.OpenRead(filePath))
+      {
+        PgpSignature signature = signatureList[0];
+        PgpPublicKey publicKey = keyRingBundle.GetPublicKey(signature.KeyId);
+
+        signature.InitVerify(publicKey);
+
+        int ch;
+        while ((ch = inputFileStream.ReadByte()) >= 0)
+        {
+          signature.Update((byte)ch);
+        }
+
+        return signature.Verify();
+      }
     }
   }
 }
